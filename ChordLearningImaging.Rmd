@@ -1,0 +1,656 @@
+---
+title: 'R Notebook for Chord Learning Imaging project: activation magnitude'
+author: "Michelle Voss"
+date: "September 2017"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+
+
+#Setup
+Clear previous, load packages, manage error 
+```{r, include=FALSE}
+
+rm(list=ls(all=TRUE))  #clear previous
+
+library(car) #for vif
+library(ggplot2)
+library(knitr)
+library(reshape2)
+library(Hmisc)
+library(psych)
+library(lme4)  
+library(lmerTest)
+library(effects)
+library(tidyverse)  #load last, and dplyr comes with it
+
+#lmer() control: sets errors to warnings, increases iterations (maxfun).  
+turn_off <- lmerControl(optimizer="bobyqa", # Nelder_Mead, bobyqa is the default 
+  optCtrl = list(maxfun = 2e5), # Increase the number of iterations: helps convergence
+  check.nobs.vs.nlev = "warning",
+  check.nobs.vs.rankZ = "warning",
+  check.nlev.gtreq.5 = "warning", 
+  check.nobs.vs.nRE = "warning",
+  check.rankX = c("ignore"),
+  check.scaleX = "warning",
+  check.formula.LHS = "warning",
+  check.conv.grad   = .makeCC("warning", tol = 1e-3, relTol = NULL))
+
+```
+
+
+#load and prep variables
+```{r,include=FALSE}
+#read  data
+freq = read.table("CL_freq.txt", header = FALSE, sep = " ")
+names(freq)
+infreq= read.table("CL_infreq.txt", header = FALSE, sep = " ")
+names(infreq)
+
+#add header
+col_headings <- c('sub','run','roi','cope','psc')
+names(freq) <- col_headings
+names(infreq) <- col_headings
+
+#add condition column
+freq$cond <- 'freq'
+infreq$cond <- 'infreq'
+
+#remove stats/cope column
+freq <-subset(freq,select = -cope)
+infreq <-subset(infreq,select = -cope)
+
+#stack freq and infreq on top of each other
+clpsc <- rbind(freq,infreq)
+
+#add age group variable
+clpsc$group<-ifelse(clpsc$sub<200,c("younger"),c("older"))
+
+```
+
+
+
+#reference for clusters and summary of mixed effects models for each cluster
+-Considered running ROI as a factor, but then need a reference cluster.  
+-It also seems like a reasonable assumption that the clusters would show different functional forms over time.
+![Task activation clusters.](chord_imaging_activation_summary_centered.png)
+
+#course description with box plots
+-no extreme outliers when averaging across sessions  
+-frequent and infrequent are highly similar
+```{r}
+ggplot(clpsc, aes(x=roi,y=psc,fill=cond)) + geom_violin(alpha=0.7,draw_quantiles=c(0.5)) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + facet_wrap(~group)
+
+ggplot(clpsc, aes(x=roi,y=psc,fill=cond)) + geom_boxplot(outlier.colour = "#1F3552", outlier.shape = 20) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + facet_wrap(~group)
+
+ggplot(clpsc, aes(x=roi,y=psc,fill=group)) + geom_boxplot(outlier.colour = "#1F3552", outlier.shape = 20) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + facet_wrap(~cond)
+```
+
+
+
+#plot individuals over session for each roi
+-frequent and infrequent highly similar  
+-linear model with quadratic term would work all rois  
+```{r}
+#zfclus1_lifg
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus1_lifg"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus1_lifg")
+print(g4)
+
+#zfclus1_lins
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus1_lins"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus1_lins")
+print(g4)
+
+#zfclus2
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus2"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus2")
+print(g4)
+
+#zfclus3
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus3"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus3")
+print(g4)
+
+#zfclus4_brainstem
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_brainstem"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus4_brainstem")
+print(g4)
+
+#zfclus4_brainstem_aan_dr
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_brainstem_aan_dr"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus4_brainstem_aan_dr")
+print(g4)
+
+#zfclus4_brainstem_aan_ppn
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_brainstem_aan_ppn"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus4_brainstem_aan_ppn")
+print(g4)
+
+
+#zfclus4_parahipp
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_parahipp"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus4_parahipp")
+print(g4)
+
+#zfclus5
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus5"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus5")
+print(g4)
+
+
+#zfclus6
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus6"), aes(x = run, y = psc, colour=cond))
+g2 <- g1 + geom_line() + geom_point() + facet_wrap(~sub)
+g3 <- g2 + theme_bw() + scale_x_continuous(name = "run")
+g4 <- g3 + scale_y_continuous(name = "psc") + ggtitle("zfclus6")
+print(g4)
+```
+
+#prep variables for modeling
+-center run like in behavioral analyses  
+-when centering time on run, linear effects of run reflect slope at intercept which is at the middle of the day  
+```{r}
+clpsc$run0 <- clpsc$run-1
+clpsc$runc3 <- clpsc$run-3
+clpsc$sub <- as.factor(clpsc$sub)
+clpsc$group <- as.factor(clpsc$group)
+clpsc$roi <- as.factor(clpsc$roi)
+clpsc$cond <- as.factor(clpsc$cond)
+```
+
+
+#set up contrasts for group and cond
+```{r}
+levels(clpsc$group)
+options(contrasts=c("contr.sum", "contr.poly"))
+contrasts(clpsc$group)  #older = +1; younger = -1
+contrasts(clpsc$cond) #freq = +1; infreq = -1
+#nothing in the data supports that Infrequent is any different so exclude from model for simplicity to match with activation analyses
+```
+
+#for each model, start with most complex and trim back
+-more complex models are commented out for simplicity  
+-To comment and uncomment blocks of code, use ctrl+shift+c  
+
+##zfclus1_lifg (LIFG)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model1)
+# 
+# model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model1b)
+
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model2)
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model2b)
+# 
+# anova(model1,model2)
+# #non-sig, drop rand quadratic
+# #
+# 
+# anova (model1b,model2b)
+# #non-sig, drop rand quadratic
+
+# #drop random slopes
+# model3 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model3)
+# anova(model2,model3)
+# #non-sig, drop random slopes
+# 
+# model3b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model3b)
+# anova(model2b,model3b)
+# #non-sig, drop random slopes
+
+
+# #remove fixed quadratic
+# model4 <- lmer(psc ~ runc3*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+# summary(model4)
+# anova(model3,model4)
+# #non-sig, keep only random intercepts
+
+model4b <- lmer(psc ~ runc3*group + (1 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+summary(model4b)
+# anova(model3b,model4b)
+# #non-sig, keep only random intercepts
+
+# anova(model4a,model4b)
+
+final_model=model4b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus1_lifg"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus1_lifg.png")
+
+#example to write out raw and fitted (see rachel's latest code)
+#writeout=cbind(fitted(final_model),subset(clpsc,roi=="zfclus1_lifg"))
+#write.csv(writeout,"final_model_zfclus1_lifg.csv",row.names=FALSE, na="")
+```
+
+###can output individual estimates of slope via random effects
+-but careful because n=12 per group is likely not enough for reliable individual differences analyses
+```{r}
+model4a <- lmer(psc ~ runc3*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus1_lifg"))
+summary(model4a)
+coef(model4a)
+```
+
+
+
+##zfclus1_lins (LINS)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model1)
+# 
+# model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model1b)
+
+#drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model2)
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model2b)
+# 
+# anova(model1,model2)
+# #non-sig, drop rand quadratic
+# 
+# anova(model1b,model2b)
+# #non-sig, drop rand quadratic
+
+# #drop random slopes
+# model3 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model3)
+# anova(model2,model3)
+# #non-sig, drop random slopes
+
+model3b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+summary(model3b)
+# anova(model2b,model3b)
+# #non-sig, drop random slopes
+
+
+#remove fixed quadratic
+# model4 <- lmer(psc ~ runc3*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model4)
+# 
+# model4b <- lmer(psc ~ runc3*group + (1 | sub), data = subset(clpsc,roi=="zfclus1_lins"))
+# summary(model4b)
+# 
+# anova(model3,model4)
+# #sig, keep fixed quadratic
+# 
+# anova(model3b,model4b)
+# #sig, keep fixed quadratic
+
+
+final_model=model3b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus1_lins"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus1_lins.png")
+
+```
+
+
+
+##zfclus2 (LSLOC)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model1)
+# 
+# model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model1b)
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model2)
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model2b)
+# 
+# anova(model1,model2)
+# #non-sig, drop rand quadratic
+# 
+# anova(model1b,model2b)
+# #non-sig, drop rand quadratic
+
+
+# #drop random slopes
+# model3 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model3)
+
+# anova(model2,model3)
+# #non-sig, drop random slopes
+
+model3b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 | sub), data = subset(clpsc,roi=="zfclus2"))
+summary(model3b)
+
+# anova(model2b,model3b)
+# # #non-sig, drop random slopes
+
+
+
+# #remove fixed quadratic
+# model4 <- lmer(psc ~ runc3*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model4)
+# 
+# anova(model3,model4)
+# #sig, keep fixed quadratic
+# 
+# 
+# model4b <- lmer(psc ~ runc3*group + (1 | sub), data = subset(clpsc,roi=="zfclus2"))
+# summary(model4b)
+# 
+# anova(model3b,model4b)
+# #sig, keep fixed quadratic
+
+final_model=model3b
+
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus2"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus2.png")
+
+
+```
+
+
+
+##zfclus3 (RSLOC)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model1)
+# 
+# model1b <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model1b)
+
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model2)
+# 
+# anova(model1,model2)
+# #non-sig (marg), drop rand quadratic
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model2b)
+# 
+# anova(model1b,model2b)
+# #non-sig (marg), drop rand quadratic
+
+# #drop random slopes
+# model3 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model3)
+# anova(model2,model3)
+# #non-sig, drop random slopes
+# 
+# model3b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 | sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model3b)
+# 
+# anova(model2b,model3b)
+# #non-sig, drop random slopes
+# 
+# #remove fixed quadratic
+# model4 <- lmer(psc ~ runc3*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus3"))
+# summary(model4)
+# anova(model3,model4)
+# #non-sig, drop fixed quadratic
+
+
+model4b <- lmer(psc ~ runc3*group + (1 | sub), data = subset(clpsc,roi=="zfclus3"))
+summary(model4b)
+# anova(model3b,model4b)
+# #non-sig, drop fixed quadratic
+
+
+final_model=model4b
+
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus3"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus3.png")
+
+
+```
+
+
+##zfclus4_brainstem (BSTEM)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model1)
+# 
+# model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model1b)
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model2)
+# anova(model1,model2)
+# #non-sig (marg), drop rand quadratic
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model2b)
+# anova(model1b,model2b)
+# #non-sig (marg), drop rand quadratic
+# 
+# 
+# #drop random slopes
+# model3 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model3)
+# anova(model2,model3)
+# #non-sig, drop random slopes
+# 
+# model3b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model3b)
+# anova(model2b,model3b)
+# #non-sig, drop random slopes
+# 
+# 
+# #remove fixed quadratic
+# model4 <- lmer(psc ~ runc3*group*cond + (1 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+# summary(model4)
+# anova(model3,model4)
+# #non-sig, drop fixed quadratic
+
+
+model4b <- lmer(psc ~ runc3*group + (1 | sub), data = subset(clpsc,roi=="zfclus4_brainstem"))
+summary(model4b)
+# anova(model3b,model4b)
+# #non-sig, drop fixed quadratic
+
+final_model=model4b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_brainstem"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus4_brainstem.png")
+```
+
+
+##zfclus4_parahipp (LPHIPP)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus4_parahipp"))
+# summary(model1)
+
+model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus4_parahipp"))
+summary(model1b)
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus4_parahipp"))
+# summary(model2)
+
+# anova(model1,model2)
+# #sig, keep rand quadratic
+
+model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus4_parahipp"))
+summary(model2b)
+anova(model1b,model2b)
+#sig, keep rand quadratic (but that model doesn't converge)
+
+final_model=model2b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus4_parahipp"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus4_parahipp.png")
+
+
+```
+
+##zfclus5 (LILOC)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus5"))
+# summary(model1)
+# 
+model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus5"))
+summary(model1b)
+# 
+# 
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus5"))
+# summary(model2)
+# anova(model1,model2)
+# #sig, keep rand quadratic
+
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus5"))
+# summary(model2b)
+# anova(model1b,model2b)
+# #sig, keep rand quadratic
+
+final_model=model1b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus5"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus5.png")
+
+
+
+```
+
+
+##zfclus6 (RILOC)
+```{r}
+# #full
+# model1 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus6"))
+# summary(model1)
+
+model1b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 + I(runc3^2)| sub), data = subset(clpsc,roi=="zfclus6"))
+summary(model1b)
+
+# #drop random quadratic
+# model2 <- lmer(psc ~ runc3*group*cond + I(runc3^2)*group*cond + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus6"))
+# summary(model2)
+# anova(model1,model2)
+# #sig, keep rand quadratic
+# 
+# model2b <- lmer(psc ~ runc3*group + I(runc3^2)*group + (1 + runc3 | sub), data = subset(clpsc,roi=="zfclus6"))
+# summary(model2b)
+# anova(model1b,model2b)
+# #sig, keep rand quadratic
+
+
+final_model=model1b
+
+#plot by groups and day
+g1 <- ggplot(data = subset(clpsc,roi=="zfclus6"), aes(x = runc3, y = psc, shape = group, color=group))
+g2 <- g1 + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666"))
+g3 <- g2 + stat_summary(aes(y = fitted(final_model), linetype = group,color=group), fun.y = mean, geom="line")
+g4 <- g3 + theme_bw(base_size=18) 
+g5 <- g4 + scale_y_continuous(name = "Percent Signal Change") + scale_x_continuous(label=c("1","2","3","4","5"), name = "Session")
+print(g5)
+ggsave(filename="zfclus6.png")
+
+```
+
+
+
+
+#plot all together
+```{r,fig.width=12}
+
+clpsc$roi<-factor(clpsc$roi,levels=c("zfclus1_lifg","zfclus1_lins","zfclus2","zfclus3","zfclus4_brainstem","zfclus4_parahipp","zfclus5","zfclus6"),labels=c("LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+clpsc$roi<-factor(clpsc$roi,levels=rev(levels(clpsc$roi)))
+
+#facet grid with freq only
+g1 <- ggplot(data = subset(clpsc,roi != "NA" & cond=="freq"), aes(x = as.numeric(run), y = psc, colour=group))
+g2 <- g1 + stat_summary(aes(y = psc,linetype=group,color=group), size=.5, fun.y = mean, geom="line") + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666")) + scale_colour_manual(values=c("#6666FF","#666666")) + facet_grid(~roi)
+g3 <- g2 + theme_bw(base_size=12)  
+g4 <- g3 + scale_x_continuous(name = "Session") +scale_y_continuous(name = "Percent Signal Change") 
+print(g4)
+ggsave(filename="facet_grid_pscs_ROIs.png",width=7,units=c("in"),dpi=300)
+
+
+#facet grid with freq & infreq 
+g1 <- ggplot(data = subset(clpsc,roi != "NA"), aes(x = as.numeric(run), y = psc, colour=group))
+g2 <- g1 + stat_summary(aes(y = psc,linetype=group,color=group), size=.5, fun.y = mean, geom="line") + stat_summary(fun.data=mean_se, geom="pointrange", size=.5) + scale_colour_manual(values=c("#6666FF","#666666")) + scale_colour_manual(values=c("#6666FF","#666666")) + facet_grid(~roi*cond)
+g3 <- g2 + theme_bw(base_size=12)  
+g4 <- g3 + scale_x_continuous(name = "Session") +scale_y_continuous(name = "Percent Signal Change") 
+print(g4)
+ggsave(filename="facet_grid_pscs_withINF_ROIs.png",width=10,units=c("in"),dpi=300)
+```
