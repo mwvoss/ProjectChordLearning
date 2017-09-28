@@ -1,0 +1,824 @@
+---
+title: "R Notebook for Chord Learning Imaging project: functional connectivity"
+author: "Michelle Voss"
+date: "September 2017"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+#goals:
+
+Use functional connectivity analyses to examine interaction of core memory structures with regions derived from task activation analyses, both during training and during the resting state before and after training.
+
+#helper resources on ANOVA in R
+https://www.psychologie.uni-heidelberg.de/ae/meth/team/mertens/blog/anova_in_r_made_easy.nb.html
+http://ademos.people.uic.edu/Chapter21.html#1212_when_you_have_an_observed_iv
+https://cran.r-project.org/web/packages/afex/vignettes/afex_anova_example.html
+
+#setup
+Clear previous, load packages, manage error 
+```{r, include=FALSE}
+
+ rm(list=ls(all=TRUE))  #clear previous
+
+library(car) #for vif
+library(knitr)
+library(reshape2)
+library(Hmisc)
+#library(lme4)   #don't load these before afex, will mask lsmeans used that is loaded from afex
+#library(lmerTest) #don't load these before afex, will mask lsmeans used that is loaded from afex
+library(effects)
+library(ggplot2)
+library(psych)
+library(afex)
+library(tidyverse)  #load last, and dplyr comes with it
+
+#lmer() control: sets errors to warnings, increases iterations (maxfun).  
+# turn_off <- lmerControl(optimizer="bobyqa", # Nelder_Mead, bobyqa is the default 
+#   optCtrl = list(maxfun = 2e5), # Increase the number of iterations: helps convergence
+#   check.nobs.vs.nlev = "warning",
+#   check.nobs.vs.rankZ = "warning",
+#   check.nlev.gtreq.5 = "warning", 
+#   check.nobs.vs.nRE = "warning",
+#   check.rankX = c("ignore"),
+#   check.scaleX = "warning",
+#   check.formula.LHS = "warning",
+#   check.conv.grad   = .makeCC("warning", tol = 1e-3, relTol = NULL))
+
+```
+
+
+
+#load and prep variables
+```{r,include=FALSE}
+#read data
+fc = read.table("roi_pairs.csv", header = TRUE, sep = ",")
+names(fc)
+
+#add age group variable
+fc$group<-ifelse(fc$sub<200,c("younger"),c("older"))
+```
+
+
+#memory system ROIs
+```{r}
+fc_mem<-fc[,c("sub","run","group","bdc.bmtl_dennis","bdcp.bmtl_dennis","bdrp.bmtl_dennis")]
+
+fc_mem_summary<- fc_mem %>% group_by(run,group) %>%
+  summarise(N=n(),mean_fc=mean(bdc.bmtl_dennis))  
+fc_mem_summary
+
+
+fc_mem.l<-melt(fc_mem,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+#now ROI pair is long format with roipair indicating pair and fc value in variable fc
+
+fc_mem.l$run<-as.factor(fc_mem.l$run)
+fc_mem.l$roipair<-as.factor(fc_mem.l$roipair)
+fc_mem.l$group<-as.factor(fc_mem.l$group)
+
+fc_meml_summary<- fc_mem.l %>% group_by(run,roipair,group) %>%
+  summarise(N=n(),mean_fc=mean(fc))  
+fc_meml_summary
+```
+
+
+
+#check for extremes
+```{r}
+#TASK
+ggplot(fc_mem.l, aes(x=run,y=fc,fill=group)) + geom_boxplot(outlier.colour = "#1F3552", outlier.shape = 20) + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + facet_wrap(~roipair)
+```
+
+
+#group avg of memory system ROI FC
+```{r}
+#subsetting
+fc_mem.lt<-subset(fc_mem.l,run != "0")
+fc_mem.lt<-subset(fc_mem.lt,run != "6")
+fc_mem.lr<-subset(fc_mem.l,run=="0"|run=="6")
+write.csv(fc_mem.lt,"chord_fc_task.csv", row.names=FALSE, na="")
+```
+
+##Cortical ROIs
+[1] "mni_zfclus1_lifg"      "mni_zfclus1_lins"      "mni_zfclus2"           "mni_zfclus3"           "mni_zfclus4_brainstem" "mni_zfclus4_parahipp"  "mni_zfclus5"          
+[8] "mni_zfclus6" 
+
+
+#task
+
+##memory with cortical rois
+
+```{r}
+fc_ids <- fc[,c("sub","run","group")]
+
+#mtl 
+fc_mtl_cort<-subset(fc, select = grep("bmtl_dennis.mni", names(fc)))
+fc_mtl_cort.w<-subset(fc_mtl_cort,select=-c(grep("aan",names(fc_mtl_cort))))
+fc_mtl_cort.w<-cbind(fc_ids,fc_mtl_cort.w)
+fc_mtl_cort.l<-melt(fc_mtl_cort.w,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+#now ROI pair is long format with roipair indicating pair and fc value in variable fc
+fc_mtl_cort_rois<-colsplit(fc_mtl_cort.l$roipair,"[.]",names=c("memroi","cortroi"))
+fc_mtl_cort.l<-cbind(fc_mtl_cort.l,fc_mtl_cort_rois)
+  
+#bdc 
+fc_bdc_cort<-subset(fc, select = grep("bdc.mni", names(fc)))
+fc_bdc_cort.w<-subset(fc_bdc_cort,select=-c(grep("aan",names(fc_bdc_cort))))
+fc_bdc_cort.w<-cbind(fc_ids,fc_bdc_cort.w)
+fc_bdc_cort.l<-melt(fc_bdc_cort.w,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+fc_bdc_cort_rois<-colsplit(fc_bdc_cort.l$roipair,"[.]",names=c("memroi","cortroi"))
+fc_bdc_cort.l<-cbind(fc_bdc_cort.l,fc_bdc_cort_rois)
+
+
+#bdrp
+fc_bdrp_cort<-subset(fc, select = grep("bdrp.mni", names(fc)))
+fc_bdrp_cort.w<-subset(fc_bdrp_cort,select=-c(grep("aan",names(fc_bdrp_cort))))
+fc_bdrp_cort.w<-cbind(fc_ids,fc_bdrp_cort.w)
+fc_bdrp_cort.l<-melt(fc_bdrp_cort.w,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+fc_bdrp_cort_rois<-colsplit(fc_bdrp_cort.l$roipair,"[.]",names=c("memroi","cortroi"))
+fc_bdrp_cort.l<-cbind(fc_bdrp_cort.l,fc_bdrp_cort_rois)
+
+
+#bdcp 
+fc_bdcp_cort<-subset(fc, select = grep("bdcp.mni", names(fc)))
+fc_bdcp_cort.w<-subset(fc_bdcp_cort,select=-c(grep("aan",names(fc_bdcp_cort))))
+fc_bdcp_cort.w<-cbind(fc_ids,fc_bdcp_cort.w)
+fc_bdcp_cort.l<-melt(fc_bdcp_cort.w,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+fc_bdcp_cort_rois<-colsplit(fc_bdcp_cort.l$roipair,"[.]",names=c("memroi","cortroi"))
+fc_bdcp_cort.l<-cbind(fc_bdcp_cort.l,fc_bdcp_cort_rois)
+
+
+#bmtl.bdc
+fc_mtl_bdc_cort.l<-rbind(fc_mtl_cort.l,fc_bdc_cort.l)
+fc_mtl_bdc_cort.lt<-subset(fc_mtl_bdc_cort.l,run != "0")
+fc_mtl_bdc_cort.lt<-subset(fc_mtl_bdc_cort.lt,run != "6")
+fc_mtl_bdc_cort.lr<-subset(fc_mtl_bdc_cort.l,run=="0"|run=="6")
+
+#bmtl.bdcp
+fc_mtl_bdcp_cort.l<-rbind(fc_mtl_cort.l,fc_bdcp_cort.l)
+fc_mtl_bdcp_cort.lt<-subset(fc_mtl_bdcp_cort.l,run != "0")
+fc_mtl_bdcp_cort.lt<-subset(fc_mtl_bdcp_cort.lt,run != "6")
+fc_mtl_bdcp_cort.lr<-subset(fc_mtl_bdcp_cort.l,run=="0"|run=="6")
+
+#bmtl.bdcrp
+fc_mtl_bdrp_cort.l<-rbind(fc_mtl_cort.l,fc_bdrp_cort.l)
+fc_mtl_bdrp_cort.lt<-subset(fc_mtl_bdrp_cort.l,run != "0")
+fc_mtl_bdrp_cort.lt<-subset(fc_mtl_bdrp_cort.lt,run != "6")
+fc_mtl_bdrp_cort.lr<-subset(fc_mtl_bdrp_cort.l,run=="0"|run=="6")
+```
+
+
+##task and rest anovas and then plot all cortical ROIs with memory ROIs on one facet grid 
+```{r}
+#data
+fc_mtl_striatal_cort.l<-rbind(fc_mtl_cort.l,fc_bdc_cort.l,fc_bdcp_cort.l,fc_bdrp_cort.l)
+fc_mtl_striatal_cort.lt<-subset(fc_mtl_striatal_cort.l,run != "0")
+fc_mtl_striatal_cort.lt<-subset(fc_mtl_striatal_cort.lt,run != "6")
+fc_mtl_striatal_cort.lr<-subset(fc_mtl_striatal_cort.l,run=="0"|run=="6")
+
+#variable setup for task
+fc_mtl_striatal_cort.lt$group<-as.factor(fc_mtl_striatal_cort.lt$group)
+fc_mtl_striatal_cort.lt$group<-factor(fc_mtl_striatal_cort.lt$group,levels=rev(levels(fc_mtl_striatal_cort.lt$group)))
+fc_mtl_striatal_cort.lt$run<-as.factor(fc_mtl_striatal_cort.lt$run)
+fc_mtl_striatal_cort.lt$run<-factor(fc_mtl_striatal_cort.lt$run,levels=c(1,2,3,4,5),labels=c("1","2","3","4","5"))
+fc_mtl_striatal_cort.lt$memroi<-as.factor(fc_mtl_striatal_cort.lt$memroi)
+fc_mtl_striatal_cort.lt$memroi<-factor(fc_mtl_striatal_cort.lt$memroi,levels=c("bdc","bdcp","bdrp","bmtl_dennis"),labels=c("BDC","BDCP","BDRP", "HIPP"))
+fc_mtl_striatal_cort.lt$cortroi<-as.factor(fc_mtl_striatal_cort.lt$cortroi)
+fc_mtl_striatal_cort.lt$cortroi<-factor(fc_mtl_striatal_cort.lt$cortroi,levels=c("mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+fc_mtl_striatal_cort.lt$cortroi<-factor(fc_mtl_striatal_cort.lt$cortroi,levels=rev(levels(fc_mtl_striatal_cort.lt$cortroi)))
+
+#variable setup for rest
+fc_mtl_striatal_cort.lr$group<-as.factor(fc_mtl_striatal_cort.lr$group)
+fc_mtl_striatal_cort.lr$group<-factor(fc_mtl_striatal_cort.lr$group,levels=rev(levels(fc_mtl_striatal_cort.lr$group)))
+fc_mtl_striatal_cort.lr$run<-as.factor(fc_mtl_striatal_cort.lr$run)
+fc_mtl_striatal_cort.lr$run<-factor(fc_mtl_striatal_cort.lr$run,levels=c(0,6),labels=c("Pre","Post"))
+fc_mtl_striatal_cort.lr$memroi<-as.factor(fc_mtl_striatal_cort.lr$memroi)
+fc_mtl_striatal_cort.lr$memroi<-factor(fc_mtl_striatal_cort.lr$memroi,levels=c("bdc","bdcp","bdrp","bmtl_dennis"),labels=c("BDC","BDCP","BDRP", "HIPP"))
+fc_mtl_striatal_cort.lr$cortroi<-as.factor(fc_mtl_striatal_cort.lr$cortroi)
+fc_mtl_striatal_cort.lr$cortroi<-factor(fc_mtl_striatal_cort.lr$cortroi,levels=c("mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+fc_mtl_striatal_cort.lr$cortroi<-factor(fc_mtl_striatal_cort.lr$cortroi,levels=rev(levels(fc_mtl_striatal_cort.lr$cortroi)))
+
+
+#task massive anova
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi*cortroi+Error(sub/run+memroi+cortroi),fc_mtl_striatal_cort.lt)
+kable(nice(fc_anova2))
+
+
+#graph
+#facet grid task
+g1 <- ggplot(data = subset(fc_mtl_striatal_cort.lt), aes(x = as.numeric(run), y = fc, colour=group))
+g2 <- g1 + stat_summary(aes(y = fc,linetype=group), size=.2, fun.y = mean, geom="line") + stat_summary(fun.data=mean_se, geom="pointrange", size=.2) + scale_colour_manual(values=c("#666666","#6666FF")) + facet_grid(memroi~cortroi)
+g3 <- g2 + theme_bw(base_size=12)  
+g4 <- g3 + scale_x_continuous(name = "Session") +scale_y_continuous(name = "Functional Connectivity") 
+print(g4)
+ggsave(filename="facet_grid_task_fc_ROIs.png",width=7,units=c("in"),dpi=300)
+
+
+
+#rest massive anova
+fc_anova3<-aov_car(fc~group*run*memroi*cortroi+Error(sub/run+memroi+cortroi),fc_mtl_striatal_cort.lr)
+kable(nice(fc_anova3))
+fc_anova3_fitted<-lsmeans(fc_anova3,~memroi|cortroi)
+fc_anova3_fitted
+pairs(fc_anova3_fitted)
+
+#facet grid rest, I think the setting for the discrete 
+g1 <- ggplot(data = subset(fc_mtl_striatal_cort.lr), aes(x = run, y = fc, colour=group, group=group))
+g2 <- g1 + stat_summary(aes(y = fc,linetype=group), size=.2, fun.y = mean, geom="line") + stat_summary(fun.data=mean_se, geom="pointrange", size=.2) + scale_colour_manual(values=c("#666666","#6666FF")) + facet_grid(memroi~cortroi)
+g3 <- g2 + theme_bw(base_size=12)  
+g4 <- g3 + scale_x_discrete(name="Session") + scale_y_continuous(name = "Functional Connectivity") 
+print(g4)
+ggsave(filename="facet_grid_rest_fc_ROIs.png",width=7,units=c("in"),dpi=300)
+
+
+
+```
+
+
+#break-down task interaction by cortical region
+
+##LIFG
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="LIFG"))
+kable(nice(fc_anova2))
+
+fc_anova2_fitted<-lsmeans(fc_anova2,~group|memroi)
+fc_anova2_fitted
+pairs(fc_anova2_fitted)
+
+```
+
+##LINS
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="LINS"))
+kable(nice(fc_anova2))
+
+fc_anova2_fitted<-lsmeans(fc_anova2,~memroi)
+fc_anova2_fitted
+pairs(fc_anova2_fitted)
+
+```
+
+##LSLOC
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="LSLOC"))
+kable(nice(fc_anova2))
+
+```
+
+##RSLOC
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="RSLOC"))
+kable(nice(fc_anova2))
+
+```
+
+##BSTEM
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="BSTEM"))
+kable(nice(fc_anova2))
+
+fc_anova2_fitted<-lsmeans(fc_anova2,~memroi)
+fc_anova2_fitted
+pairs(fc_anova2_fitted)
+```
+
+##LPHIPP
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="LPHIPP"))
+kable(nice(fc_anova2))
+
+fc_anova2_fitted<-lsmeans(fc_anova2,~memroi)
+fc_anova2_fitted
+pairs(fc_anova2_fitted)
+
+```
+
+##LILOC
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="LILOC"))
+kable(nice(fc_anova2))
+
+```
+
+
+##RILOC
+```{r}
+#car gives effect size estimate
+fc_anova2<-aov_car(fc~group*run*memroi+Error(sub/run+memroi),subset(fc_mtl_striatal_cort.lt,cortroi=="RILOC"))
+kable(nice(fc_anova2))
+
+fc_anova2_fitted<-lsmeans(fc_anova2,~memroi)
+fc_anova2_fitted
+pairs(fc_anova2_fitted)
+
+```
+
+
+#explore inter-relationship of cortical rois across runs
+
+```{r}
+library(RColorBrewer)
+library(psych)
+library(ade4)
+library(qgraph)
+library(gdata)
+
+#young v old run 0
+df=read.xls("fc_mats.xlsx",sheet = 1, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 2, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young0c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Pre",line=2.5)
+dev.off()
+
+png('old0c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Pre",line=2.5)
+dev.off()
+
+```
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_0_p.csv", header = FALSE, sep = ",")
+mat0<-mat
+ltri<-lower.tri(mat0) 
+utri <- upper.tri(mat0) 
+mat0[ltri] <- p.adjust(mat0[ltri], method = "BH") 
+mat0[utri] <- t(mat0)[utri] 
+mat_fdr_p05<-mat0
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+
+```{r}
+#young v old run 1
+df=read.xls("fc_mats.xlsx",sheet = 3, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 4, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young1c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Session 1",line=2.5)
+dev.off()
+
+png('old1c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Session 1",line=2.5)
+dev.off()
+
+```
+
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_1_p.csv", header = FALSE, sep = ",")
+mat1<-mat
+ltri<-lower.tri(mat1) 
+utri <- upper.tri(mat1) 
+mat1[ltri] <- p.adjust(mat1[ltri], method = "fdr") 
+mat1[utri] <- t(mat1)[utri] 
+mat_fdr_p05<-mat1
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+
+```{r}
+#young v old run 2
+df=read.xls("fc_mats.xlsx",sheet = 5, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 6, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young2c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Session 2",line=2.5)
+dev.off()
+
+png('old2c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Session 2",line=2.5)
+dev.off()
+
+```
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_2_p.csv", header = FALSE, sep = ",")
+mat2<-mat
+ltri<-lower.tri(mat2) 
+utri <- upper.tri(mat2) 
+mat2[ltri] <- p.adjust(mat2[ltri], method = "fdr") 
+mat2[utri] <- t(mat2)[utri] 
+mat_fdr_p05<-mat2
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+```{r}
+#young v old run 3
+df=read.xls("fc_mats.xlsx",sheet = 7, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 8, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young3c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Session 3",line=2.5)
+dev.off()
+
+png('old3c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Session 3",line=2.5)
+dev.off()
+```
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_3_p.csv", header = FALSE, sep = ",")
+mat3<-mat
+ltri<-lower.tri(mat3) 
+utri <- upper.tri(mat3) 
+mat3[ltri] <- p.adjust(mat3[ltri], method = "fdr") 
+mat3[utri] <- t(mat3)[utri] 
+mat_fdr_p05<-mat3
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+
+```{r}
+#young v old run 4
+df=read.xls("fc_mats.xlsx",sheet = 9, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 10, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young4c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Session 4",line=2.5)
+dev.off()
+
+png('old4c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Session 4",line=2.5)
+dev.off()
+```
+
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_4_p.csv", header = FALSE, sep = ",")
+mat4<-mat
+ltri<-lower.tri(mat4) 
+utri <- upper.tri(mat4) 
+mat4[ltri] <- p.adjust(mat4[ltri], method = "fdr") 
+mat4[utri] <- t(mat4)[utri] 
+mat_fdr_p05<-mat4
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+```{r}
+#young v old run 5
+df=read.xls("fc_mats.xlsx",sheet = 11, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 12, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young5c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Session 5",line=2.5)
+dev.off()
+
+png('old5c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Session 5",line=2.5)
+dev.off()
+```
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_5_p.csv", header = FALSE, sep = ",")
+mat5<-mat
+ltri<-lower.tri(mat5) 
+utri <- upper.tri(mat5) 
+mat5[ltri] <- p.adjust(mat5[ltri], method = "fdr") 
+mat5[utri] <- t(mat5)[utri] 
+mat_fdr_p05<-mat5
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+
+```{r}
+#young v old run 6
+df=read.xls("fc_mats.xlsx",sheet = 13, header = TRUE)
+df[df=="Inf"]<-1
+rnames<-df[,1]
+mat_data1 <- data.matrix(df[,2:ncol(df)])
+rownames(mat_data1) <- rnames
+#dist1<-as.dist(mat_data1,method="correlation")
+dist1<-as.dist(cor2dist(mat_data1))
+#heatmap(mat_data,Rowv=NA,scale='none',col = brewer.pal(n=9, name="RdYlBu"))
+dist1sim<-1/dist1
+
+df2=read.xls("fc_mats.xlsx",sheet = 14, header = TRUE)
+df2[df2=="Inf"]<-1
+rnames<-df2[,1]
+mat_data2 <- data.matrix(df2[,2:ncol(df2)])
+rownames(mat_data2) <- rnames
+#dist2<-as.dist(mat_data2)
+dist2<-as.dist(cor2dist(mat_data2))
+dist2sim<-1/dist2
+
+mantel.rtest(dist1,dist2,nrepet=1000,alter=c("two-sided"))
+
+png('young6c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data1,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Young Post",line=2.5)
+dev.off()
+
+png('old6c.png', width=1000, height=1000, unit='px')
+qgraph(mat_data2,minimum=.10,posCol = "blue", negCol = "red",layout='circle', vsize=6,labels = colnames(mat_data1))
+title("Old Post",line=2.5)
+dev.off()
+```
+
+
+```{r}
+#t-test pvalues
+mat = read.table("/Users/michellevoss/Dropbox/MichelleDocuments/MyWriting/Papers/AssocTasksLearning/ChordImaging/Analyses/fMRIstats/NvA_r2/FunctionalConnectivity/CorrMats/CorrPairs_6_p.csv", header = FALSE, sep = ",")
+mat6<-mat
+ltri<-lower.tri(mat6) 
+utri <- upper.tri(mat6) 
+mat6[ltri] <- p.adjust(mat6[ltri], method = "fdr") 
+mat6[utri] <- t(mat6)[utri] 
+mat_fdr_p05<-mat6
+mat_fdr_p05[mat_fdr_p05>.05]<-NA
+```
+
+
+```{r}
+library(gridExtra)
+library(png)
+library(grid)
+p1<-readPNG("young0c.png")
+g1<-rasterGrob(p1)
+p2<-readPNG("old0c.png")
+g2<-rasterGrob(p2)
+
+p3<-readPNG("young1c.png")
+g3<-rasterGrob(p3)
+p4<-readPNG("old1c.png")
+g4<-rasterGrob(p4)
+
+
+p5<-readPNG("young2c.png")
+g5<-rasterGrob(p5)
+p6<-readPNG("old2c.png")
+g6<-rasterGrob(p6)
+
+
+p7<-readPNG("young3c.png")
+g7<-rasterGrob(p7)
+p8<-readPNG("old3c.png")
+g8<-rasterGrob(p8)
+
+
+p9<-readPNG("young4c.png")
+g9<-rasterGrob(p9)
+p10<-readPNG("old4c.png")
+g10<-rasterGrob(p10)
+
+p11<-readPNG("young5c.png")
+g11<-rasterGrob(p11)
+p12<-readPNG("old5c.png")
+g12<-rasterGrob(p12)
+
+p13<-readPNG("young6c.png")
+g13<-rasterGrob(p13)
+p14<-readPNG("old6c.png")
+g14<-rasterGrob(p13)
+
+pdf("exploratory.pdf")
+grid.arrange(g1,g3,g5,g7,g9,g11,g13,g2,g4,g6,g8,g10,g12,g14,ncol=7,nrow=2)
+dev.off()
+
+pdf("exploratory2.pdf")
+grid.arrange(g1,g2,g3,g4,g5,g6,g7,g8,g9,g10,g11,g12,g13,g14,ncol=2,nrow=7)
+dev.off()
+
+```
+
+
+#set up input data for cort*cort roi fc in long form
+```{r}
+#fc is the megadataframe
+fc_ids <- fc[,c("sub","run","group")]
+fc_cort<-fc[,c(49:93)]
+fc_cort<-subset(fc_cort,select=-c(grep("aan",names(fc_cort))))
+fc_cort.w<-cbind(fc_ids,fc_cort)
+fc_cort.l<-melt(fc_cort.w,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+#now ROI pair is long format with roipair indicating pair and fc value in variable fc
+fc_cort_rois<-colsplit(fc_cort.l$roipair,"[.]",names=c("cortroi1","cortroi2"))
+fc_cort.l<-cbind(fc_cort.l,fc_cort_rois)
+
+
+fc_cort.l$cortroi1<-as.factor(fc_cort.l$cortroi1)
+fc_cort.l$cortroi2<-as.factor(fc_cort.l$cortroi2)
+
+fc_cort.l$cortroi1<-factor(fc_cort.l$cortroi1,levels=c("mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+fc_cort.l$cortroi2<-factor(fc_cort.l$cortroi2,levels=c("mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+
+fc_cort.l$cortroi1<-factor(fc_cort.l$cortroi1,levels=rev(levels(fc_cort.l$cortroi1)))
+fc_cort.l$cortroi2<-factor(fc_cort.l$cortroi2,levels=rev(levels(fc_cort.l$cortroi2)))
+
+fc_cort.l$group<-as.factor(fc_cort.l$group)
+fc_cort.l$group<-factor(fc_cort.l$group,levels=rev(levels(fc_cort.l$group)))
+
+```
+
+
+#heatmaps from long form data, can use subset for each run or facet grid by run
+http://pseudofish.com/triangle-heatmaps-in-r-using-ggplot.html
+```{r}
+#try heatmap for run 1
+ggplot(fc_cort.l, aes(cortroi1, cortroi2)) +
+    ggtitle('Task ROI FC across sessions') +
+    theme_bw() +
+    xlab('Task ROI') +
+    ylab('Task ROI') +
+    geom_tile(aes(fill = fc), color='white') +
+    facet_grid(group~run) +
+    scale_fill_gradient2(low = 'firebrick',mid="white",high = 'darkblue',space = 'Lab')  +
+    theme(axis.text.x=element_text(angle=90),
+          axis.ticks=element_blank(),
+          axis.line=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_line(color='#eeeeee'))
+ggsave(filename="facet_grid_task_by_task_fc.png",width=9,units=c("in"),dpi=300)
+
+#scale_fill_gradient(low = 'white', high = 'darkblue', space = 'Lab') +
+```
+
+
+#do similar but all ROIs
+```{r}
+#fc is the megadataframe
+fc_ids <- fc[,c("sub","run","group")]
+fc_all<-fc
+fc_all<-subset(fc_all,select=-c(grep("aan",names(fc_all))))
+fc_all.l<-melt(fc_all,id.vars=c("sub","run","group"),variable.name="roipair",value.name="fc")  
+#now ROI pair is long format with roipair indicating pair and fc value in variable fc
+fc_all_rois<-colsplit(fc_all.l$roipair,"[.]",names=c("roi1","roi2"))
+fc_all.l<-cbind(fc_all.l,fc_all_rois)
+
+
+fc_all.l$roi1<-as.factor(fc_all.l$roi1)
+fc_all.l$roi2<-as.factor(fc_all.l$roi2)
+
+fc_all.l$roi1<-factor(fc_all.l$roi1,levels=c("bdc","bdcp","bdrp","bmtl_dennis","mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("BDC","BDCP","BDRP", "HIPP","LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+fc_all.l$roi2<-factor(fc_all.l$roi2,levels=c("bdc","bdcp","bdrp","bmtl_dennis","mni_zfclus1_lifg","mni_zfclus1_lins","mni_zfclus2","mni_zfclus3","mni_zfclus4_brainstem","mni_zfclus4_parahipp","mni_zfclus5","mni_zfclus6"),labels=c("BDC","BDCP","BDRP", "HIPP","LIFG", "LINS","LSLOC","RSLOC","BSTEM","LPHIPP","LILOC","RILOC"))
+
+fc_all.l$roi1<-factor(fc_all.l$roi1,levels=rev(levels(fc_all.l$roi1)))
+fc_all.l$roi2<-factor(fc_all.l$roi2,levels=rev(levels(fc_all.l$roi2)))
+
+fc_all.l$group<-as.factor(fc_all.l$group)
+fc_all.l$group<-factor(fc_all.l$group,levels=rev(levels(fc_all.l$group)))
+
+```
+
+
+
+```{r, fig.width=10}
+ggplot(fc_all.l, aes(roi1, roi2)) +
+    ggtitle('ROI FC across sessions') +
+    theme_bw() +
+    xlab('ROI') +
+    ylab('ROI') +
+    geom_tile(aes(fill = fc), color='white') +
+    facet_grid(group~run) +
+    scale_fill_gradient2(low = 'firebrick',mid="white",high = 'darkblue',space = 'Lab')  +
+    theme(axis.text.x=element_text(angle=90),
+          axis.ticks=element_blank(),
+          axis.line=element_blank(),
+          panel.border=element_blank(),
+          panel.grid.major=element_line(color='#eeeeee'))
+ggsave(filename="facet_grid_all_fc.png",width=9,units=c("in"),dpi=300)
+```
